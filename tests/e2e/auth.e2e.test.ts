@@ -31,12 +31,18 @@ let server: Server;
 let baseUrl: string;
 let dbAvailable = false;
 
+interface Envelope {
+  status: 1 | 0 | 2 | -1;
+  message: string;
+  data: Record<string, unknown>;
+}
+
 async function api(path: string, init?: RequestInit) {
   const res = await fetch(`${baseUrl}${path}`, {
     ...init,
     headers: { "content-type": "application/json", ...(init?.headers ?? {}) },
   });
-  return { res, body: (await res.json()) as Record<string, unknown> };
+  return { res, body: (await res.json()) as Envelope };
 }
 
 beforeAll(async () => {
@@ -50,9 +56,6 @@ beforeAll(async () => {
   }
   await setupSchema();
 
-  // Inject the test db into the app's auth service by replacing getDb with our connection.
-  // We do this by mocking the module-level db: simpler approach is to ensure DATABASE_URL
-  // points at the same TEST_DATABASE_URL. test-env.ts already aliases them.
   const app = buildApp();
   server = app.listen(0);
   const addr = server.address() as AddressInfo;
@@ -80,19 +83,19 @@ const REGISTER_PAYLOAD = {
 };
 
 describe("POST /auth/register", () => {
-  test.skipIf(!dbAvailable)("creates a user and sends OTP", async () => {
+  test.skipIf(!dbAvailable)("creates a user, sends OTP, returns envelope status=1", async () => {
     const { res, body } = await api("/auth/register", {
       method: "POST",
       body: JSON.stringify(REGISTER_PAYLOAD),
     });
     expect(res.status).toBe(201);
-    expect(body).toEqual({ status: 1, message: "OTP sent to email" });
+    expect(body).toEqual({ status: 1, message: "OTP sent to email", data: {} });
     expect(captured).toHaveLength(1);
     expect(captured[0]?.to).toBe(REGISTER_PAYLOAD.email);
     expect(captured[0]?.code).toMatch(/^\d{6}$/);
   });
 
-  test.skipIf(!dbAvailable)("rejects a duplicate email with 409", async () => {
+  test.skipIf(!dbAvailable)("rejects duplicate email — http 409, status=0", async () => {
     await api("/auth/register", { method: "POST", body: JSON.stringify(REGISTER_PAYLOAD) });
     const { res, body } = await api("/auth/register", {
       method: "POST",
@@ -100,25 +103,30 @@ describe("POST /auth/register", () => {
     });
     expect(res.status).toBe(409);
     expect(body.status).toBe(0);
-    expect((body.error as { code: string }).code).toBe("EMAIL_ALREADY_EXISTS");
+    expect(body.data.code).toBe("EMAIL_ALREADY_EXISTS");
+    expect((body.data.fields as Record<string, string>).email).toBeDefined();
   });
 
-  test.skipIf(!dbAvailable)("rejects invalid input with 422 and field errors", async () => {
-    const { res, body } = await api("/auth/register", {
-      method: "POST",
-      body: JSON.stringify({ ...REGISTER_PAYLOAD, phone: "123", email: "nope", password: "x" }),
-    });
-    expect(res.status).toBe(422);
-    const err = body.error as { code: string; fields: Record<string, string> };
-    expect(err.code).toBe("VALIDATION_FAILED");
-    expect(err.fields.phone).toBeDefined();
-    expect(err.fields.email).toBeDefined();
-    expect(err.fields.password).toBeDefined();
-  });
+  test.skipIf(!dbAvailable)(
+    "rejects invalid input — http 422, status=0, field errors",
+    async () => {
+      const { res, body } = await api("/auth/register", {
+        method: "POST",
+        body: JSON.stringify({ ...REGISTER_PAYLOAD, phone: "123", email: "nope", password: "x" }),
+      });
+      expect(res.status).toBe(422);
+      expect(body.status).toBe(0);
+      expect(body.data.code).toBe("VALIDATION_FAILED");
+      const fields = body.data.fields as Record<string, string>;
+      expect(fields.phone).toBeDefined();
+      expect(fields.email).toBeDefined();
+      expect(fields.password).toBeDefined();
+    },
+  );
 });
 
 describe("POST /auth/verify-otp", () => {
-  test.skipIf(!dbAvailable)("verifies a correct OTP and returns a JWT + user", async () => {
+  test.skipIf(!dbAvailable)("verifies correct OTP — status=1 with token+user in data", async () => {
     await api("/auth/register", { method: "POST", body: JSON.stringify(REGISTER_PAYLOAD) });
     const otp = lastOtp();
 
@@ -129,31 +137,34 @@ describe("POST /auth/verify-otp", () => {
 
     expect(res.status).toBe(200);
     expect(body.status).toBe(1);
-    expect(typeof body.token).toBe("string");
-    const user = body.user as Record<string, unknown>;
+    expect(body.message).toBe("Email verified");
+    expect(typeof body.data.token).toBe("string");
+    const user = body.data.user as Record<string, unknown>;
     expect(user.email).toBe(REGISTER_PAYLOAD.email);
     expect(user.isEmailVerified).toBe(true);
     expect(user.id).toBeDefined();
     expect(user.createdAt).toBeDefined();
   });
 
-  test.skipIf(!dbAvailable)("returns 400 for a wrong OTP", async () => {
+  test.skipIf(!dbAvailable)("wrong OTP — http 400, status=0", async () => {
     await api("/auth/register", { method: "POST", body: JSON.stringify(REGISTER_PAYLOAD) });
     const { res, body } = await api("/auth/verify-otp", {
       method: "POST",
       body: JSON.stringify({ email: REGISTER_PAYLOAD.email, otp: "000000" }),
     });
     expect(res.status).toBe(400);
-    expect((body.error as { code: string }).code).toBe("INVALID_OTP");
+    expect(body.status).toBe(0);
+    expect(body.data.code).toBe("INVALID_OTP");
   });
 
-  test.skipIf(!dbAvailable)("returns 404 if the email is not registered", async () => {
+  test.skipIf(!dbAvailable)("unregistered email — http 404, status=0", async () => {
     const { res, body } = await api("/auth/verify-otp", {
       method: "POST",
       body: JSON.stringify({ email: "ghost@example.com", otp: "123456" }),
     });
     expect(res.status).toBe(404);
-    expect((body.error as { code: string }).code).toBe("EMAIL_NOT_REGISTERED");
+    expect(body.status).toBe(0);
+    expect(body.data.code).toBe("EMAIL_NOT_REGISTERED");
   });
 });
 
@@ -166,54 +177,54 @@ describe("POST /auth/resend-otp", () => {
       body: JSON.stringify({ email: REGISTER_PAYLOAD.email }),
     });
     expect(res.status).toBe(200);
-    expect(body).toEqual({ status: 1, message: "OTP resent" });
+    expect(body).toEqual({ status: 1, message: "OTP resent", data: {} });
     expect(captured).toHaveLength(1);
   });
 
-  test.skipIf(!dbAvailable)("rate-limits after 3 resends in 10 minutes (429)", async () => {
-    await api("/auth/register", { method: "POST", body: JSON.stringify(REGISTER_PAYLOAD) });
-    // Register issues 1 OTP (rate-limit-exempt). 3 explicit resends should land at the limit.
-    await api("/auth/resend-otp", {
-      method: "POST",
-      body: JSON.stringify({ email: REGISTER_PAYLOAD.email }),
-    });
-    await api("/auth/resend-otp", {
-      method: "POST",
-      body: JSON.stringify({ email: REGISTER_PAYLOAD.email }),
-    });
-    await api("/auth/resend-otp", {
-      method: "POST",
-      body: JSON.stringify({ email: REGISTER_PAYLOAD.email }),
-    });
-    const { res, body } = await api("/auth/resend-otp", {
-      method: "POST",
-      body: JSON.stringify({ email: REGISTER_PAYLOAD.email }),
-    });
-    expect(res.status).toBe(429);
-    expect((body.error as { code: string }).code).toBe("OTP_RATE_LIMITED");
-  });
+  test.skipIf(!dbAvailable)(
+    "rate-limits after 3 resends in 10 min — http 429, status=0",
+    async () => {
+      await api("/auth/register", { method: "POST", body: JSON.stringify(REGISTER_PAYLOAD) });
+      for (let i = 0; i < 3; i++) {
+        await api("/auth/resend-otp", {
+          method: "POST",
+          body: JSON.stringify({ email: REGISTER_PAYLOAD.email }),
+        });
+      }
+      const { res, body } = await api("/auth/resend-otp", {
+        method: "POST",
+        body: JSON.stringify({ email: REGISTER_PAYLOAD.email }),
+      });
+      expect(res.status).toBe(429);
+      expect(body.status).toBe(0);
+      expect(body.data.code).toBe("OTP_RATE_LIMITED");
+    },
+  );
 
-  test.skipIf(!dbAvailable)("404 when email isn't registered", async () => {
-    const { res } = await api("/auth/resend-otp", {
+  test.skipIf(!dbAvailable)("unregistered email — http 404, status=0", async () => {
+    const { res, body } = await api("/auth/resend-otp", {
       method: "POST",
       body: JSON.stringify({ email: "ghost@example.com" }),
     });
     expect(res.status).toBe(404);
+    expect(body.status).toBe(0);
+    expect(body.data.code).toBe("EMAIL_NOT_REGISTERED");
   });
 });
 
 describe("POST /auth/login", () => {
-  test.skipIf(!dbAvailable)("returns 403 when email is not yet verified", async () => {
+  test.skipIf(!dbAvailable)("unverified email — http 403, status=2 (auth)", async () => {
     await api("/auth/register", { method: "POST", body: JSON.stringify(REGISTER_PAYLOAD) });
     const { res, body } = await api("/auth/login", {
       method: "POST",
       body: JSON.stringify({ email: REGISTER_PAYLOAD.email, password: REGISTER_PAYLOAD.password }),
     });
     expect(res.status).toBe(403);
-    expect((body.error as { code: string }).code).toBe("EMAIL_NOT_VERIFIED");
+    expect(body.status).toBe(2);
+    expect(body.data.code).toBe("EMAIL_NOT_VERIFIED");
   });
 
-  test.skipIf(!dbAvailable)("logs in and returns a token once email is verified", async () => {
+  test.skipIf(!dbAvailable)("happy path — status=1 with token+user", async () => {
     await api("/auth/register", { method: "POST", body: JSON.stringify(REGISTER_PAYLOAD) });
     await api("/auth/verify-otp", {
       method: "POST",
@@ -225,11 +236,12 @@ describe("POST /auth/login", () => {
       body: JSON.stringify({ email: REGISTER_PAYLOAD.email, password: REGISTER_PAYLOAD.password }),
     });
     expect(res.status).toBe(200);
-    expect(typeof body.token).toBe("string");
-    expect((body.user as { email: string }).email).toBe(REGISTER_PAYLOAD.email);
+    expect(body.status).toBe(1);
+    expect(typeof body.data.token).toBe("string");
+    expect((body.data.user as { email: string }).email).toBe(REGISTER_PAYLOAD.email);
   });
 
-  test.skipIf(!dbAvailable)("returns 401 for wrong password", async () => {
+  test.skipIf(!dbAvailable)("wrong password — http 401, status=2 (auth)", async () => {
     await api("/auth/register", { method: "POST", body: JSON.stringify(REGISTER_PAYLOAD) });
     await api("/auth/verify-otp", {
       method: "POST",
@@ -240,52 +252,58 @@ describe("POST /auth/login", () => {
       body: JSON.stringify({ email: REGISTER_PAYLOAD.email, password: "wrongpass" }),
     });
     expect(res.status).toBe(401);
-    expect((body.error as { code: string }).code).toBe("INVALID_CREDENTIALS");
+    expect(body.status).toBe(2);
+    expect(body.data.code).toBe("INVALID_CREDENTIALS");
   });
 });
 
 describe("POST /auth/logout", () => {
-  test.skipIf(!dbAvailable)("revokes the token so the same jti can't be reused", async () => {
+  test.skipIf(!dbAvailable)("revokes token; reuse → http 401, status=2", async () => {
     await api("/auth/register", { method: "POST", body: JSON.stringify(REGISTER_PAYLOAD) });
     const { body: vbody } = await api("/auth/verify-otp", {
       method: "POST",
       body: JSON.stringify({ email: REGISTER_PAYLOAD.email, otp: lastOtp() }),
     });
-    const token = vbody.token as string;
+    const token = vbody.data.token as string;
 
     const logout = await api("/auth/logout", {
       method: "POST",
       headers: { authorization: `Bearer ${token}` },
     });
     expect(logout.res.status).toBe(200);
+    expect(logout.body.status).toBe(1);
 
     const second = await api("/auth/logout", {
       method: "POST",
       headers: { authorization: `Bearer ${token}` },
     });
     expect(second.res.status).toBe(401);
-    expect((second.body.error as { code: string }).code).toBe("TOKEN_REVOKED");
+    expect(second.body.status).toBe(2);
+    expect(second.body.data.code).toBe("TOKEN_REVOKED");
   });
 
-  test.skipIf(!dbAvailable)("rejects requests without an Authorization header (401)", async () => {
+  test.skipIf(!dbAvailable)("no auth header — http 401, status=2", async () => {
     const { res, body } = await api("/auth/logout", { method: "POST" });
     expect(res.status).toBe(401);
-    expect((body.error as { code: string }).code).toBe("UNAUTHORIZED");
+    expect(body.status).toBe(2);
+    expect(body.data.code).toBe("UNAUTHORIZED");
   });
 });
 
 describe("misc", () => {
-  test.skipIf(!dbAvailable)("GET /health returns ok", async () => {
+  test.skipIf(!dbAvailable)("GET /health → status=1", async () => {
     const { res, body } = await api("/health");
     expect(res.status).toBe(200);
     expect(body.status).toBe(1);
+    expect(body.message).toBe("ok");
+    expect(body.data.service).toBe("upsccompass-auth-api");
   });
 
-  test.skipIf(!dbAvailable)("unknown route returns 404", async () => {
-    const { res } = await api("/does-not-exist");
+  test.skipIf(!dbAvailable)("unknown route → http 404, status=0", async () => {
+    const { res, body } = await api("/does-not-exist");
     expect(res.status).toBe(404);
+    expect(body.status).toBe(0);
   });
 });
 
-// Touch testDb to avoid unused-import warnings; helpers live there.
 void testDb;

@@ -118,23 +118,42 @@ API base path: /api/v1
 
 ```bash
 curl -s http://localhost:3000/api/v1/health
-# → {"status":1,"service":"upsccompass-auth-api","time":"..."}
+# → {"status":1,"message":"ok","data":{"service":"upsccompass-auth-api","time":"..."}}
 ```
 
 ---
 
 ## API reference (summary)
 
-All routes are mounted under `/api/v1`. All requests and responses are JSON (`Content-Type: application/json`). The detailed contract lives in `AUTH_API.md`; this section summarises endpoint shapes.
+All routes are mounted under `/api/v1`. All requests and responses are JSON (`Content-Type: application/json`).
 
-### Standard error response
+### Response envelope
+
+**Every** response — success or error — uses the same shape:
+
+```json
+{ "status": 1, "message": "human-readable", "data": { ... } }
+```
+
+The numeric `status` field is a discriminator the client switches on, independent from HTTP status. This lets a single endpoint signal multiple distinct sub-cases without parsing HTTP codes:
+
+| `status` | Meaning                                          | HTTP codes              |
+|----------|--------------------------------------------------|-------------------------|
+| `1`      | Success                                          | 200, 201                |
+| `0`      | Client error — bad input / not found / conflict / rate-limited | 400, 404, 409, 422, 429 |
+| `2`      | Auth required or denied — show login / re-auth   | 401, 403                |
+| `-1`     | Server error — retry or report                   | 500                     |
+
+On success, `data` carries the payload (`{ token, user }`, etc.). On error, `data` carries `{ code, fields? }` — `code` is a stable machine-readable identifier (`EMAIL_ALREADY_EXISTS`, `INVALID_OTP`, ...) and `fields` is present only for validation errors.
+
+Example error body:
 
 ```json
 {
   "status": 0,
-  "error": {
+  "message": "An account with this email already exists.",
+  "data": {
     "code": "EMAIL_ALREADY_EXISTS",
-    "message": "An account with this email already exists.",
     "fields": { "email": "Already registered" }
   }
 }
@@ -149,11 +168,11 @@ Request body:
 { "name": "Rajat", "phone": "9876543210", "city": "Delhi", "email": "rajat@example.com", "password": "secret1" }
 ```
 
-| Status | When                                         |
-|--------|----------------------------------------------|
-| 201    | `{ "status": 1, "message": "OTP sent to email" }` |
-| 409    | `EMAIL_ALREADY_EXISTS`                       |
-| 422    | `VALIDATION_FAILED` with `fields.{name,phone,city,email,password}` |
+| HTTP | `status` | Body                                                                                |
+|------|----------|--------------------------------------------------------------------------------------|
+| 201  | `1`      | `{ "status": 1, "message": "OTP sent to email", "data": {} }`                       |
+| 409  | `0`      | `data.code = "EMAIL_ALREADY_EXISTS"`                                                |
+| 422  | `0`      | `data.code = "VALIDATION_FAILED"` + `data.fields.{name,phone,city,email,password}` |
 
 ### `POST /api/v1/auth/verify-otp`
 
@@ -164,11 +183,11 @@ Request body:
 { "email": "rajat@example.com", "otp": "123456" }
 ```
 
-| Status | When                                         |
-|--------|----------------------------------------------|
-| 200    | `{ "status": 1, "token": "<jwt>", "user": { ... } }` |
-| 400    | `INVALID_OTP` / `OTP_EXPIRED` / `OTP_ATTEMPTS_EXCEEDED` |
-| 404    | `EMAIL_NOT_REGISTERED`                       |
+| HTTP | `status` | Body                                                                       |
+|------|----------|----------------------------------------------------------------------------|
+| 200  | `1`      | `{ "status": 1, "message": "Email verified", "data": { "token": "<jwt>", "user": { ... } } }` |
+| 400  | `0`      | `data.code = "INVALID_OTP" \| "OTP_EXPIRED" \| "OTP_ATTEMPTS_EXCEEDED"`   |
+| 404  | `0`      | `data.code = "EMAIL_NOT_REGISTERED"`                                       |
 
 ### `POST /api/v1/auth/resend-otp`
 
@@ -179,11 +198,11 @@ Request body:
 { "email": "rajat@example.com" }
 ```
 
-| Status | When                                         |
-|--------|----------------------------------------------|
-| 200    | `{ "status": 1, "message": "OTP resent" }`   |
-| 404    | `EMAIL_NOT_REGISTERED`                       |
-| 429    | `OTP_RATE_LIMITED` — max 3 resends per 10 minutes per email |
+| HTTP | `status` | Body                                                                         |
+|------|----------|------------------------------------------------------------------------------|
+| 200  | `1`      | `{ "status": 1, "message": "OTP resent", "data": {} }`                       |
+| 404  | `0`      | `data.code = "EMAIL_NOT_REGISTERED"`                                         |
+| 429  | `0`      | `data.code = "OTP_RATE_LIMITED"` — max 3 resends per 10 minutes per email   |
 
 ### `POST /api/v1/auth/login`
 
@@ -194,11 +213,11 @@ Request body:
 { "email": "rajat@example.com", "password": "secret1" }
 ```
 
-| Status | When                                         |
-|--------|----------------------------------------------|
-| 200    | `{ "status": 1, "token": "<jwt>", "user": { ... } }` |
-| 401    | `INVALID_CREDENTIALS`                        |
-| 403    | `EMAIL_NOT_VERIFIED`                         |
+| HTTP | `status` | Body                                                                                          |
+|------|----------|-----------------------------------------------------------------------------------------------|
+| 200  | `1`      | `{ "status": 1, "message": "Logged in", "data": { "token": "<jwt>", "user": { ... } } }`     |
+| 401  | `2`      | `data.code = "INVALID_CREDENTIALS"`                                                          |
+| 403  | `2`      | `data.code = "EMAIL_NOT_VERIFIED"`                                                           |
 
 ### `POST /api/v1/auth/logout`
 
@@ -206,14 +225,14 @@ Revoke the current JWT by storing its `jti` in `revoked_tokens`. The token's sig
 
 Headers: `Authorization: Bearer <token>`
 
-| Status | When                                         |
-|--------|----------------------------------------------|
-| 200    | `{ "status": 1 }`                            |
-| 401    | `UNAUTHORIZED` / `TOKEN_EXPIRED` / `TOKEN_REVOKED` |
+| HTTP | `status` | Body                                                            |
+|------|----------|-----------------------------------------------------------------|
+| 200  | `1`      | `{ "status": 1, "message": "Logged out", "data": {} }`         |
+| 401  | `2`      | `data.code = "UNAUTHORIZED" \| "TOKEN_EXPIRED" \| "TOKEN_REVOKED"` |
 
 ### `GET /api/v1/health`
 
-Liveness probe. Returns `{ "status": 1, "service": "...", "time": "..." }`.
+Liveness probe. Returns `{ "status": 1, "message": "ok", "data": { "service": "...", "time": "..." } }`.
 
 ---
 

@@ -14,7 +14,7 @@ export async function registerHandler(req: Request, res: Response, next: NextFun
   try {
     const body = getValidated<RegisterBody>(req);
     await authService.register(body);
-    return success(res, { message: "OTP sent to email" }, 201);
+    return success(res, "OTP sent to email", {}, 201);
   } catch (err) {
     next(err);
   }
@@ -24,7 +24,7 @@ export async function verifyOtpHandler(req: Request, res: Response, next: NextFu
   try {
     const body = getValidated<VerifyOtpBody>(req);
     const { token, user } = await authService.verifyOtpAndIssueToken(body.email, body.otp);
-    return success(res, { token, user });
+    return success(res, "Email verified", { token, user });
   } catch (err) {
     next(err);
   }
@@ -34,7 +34,7 @@ export async function resendOtpHandler(req: Request, res: Response, next: NextFu
   try {
     const body = getValidated<ResendOtpBody>(req);
     await authService.resendOtp(body.email);
-    return success(res, { message: "OTP resent" });
+    return success(res, "OTP resent", {});
   } catch (err) {
     next(err);
   }
@@ -44,7 +44,7 @@ export async function loginHandler(req: Request, res: Response, next: NextFuncti
   try {
     const body = getValidated<LoginBody>(req);
     const { token, user } = await authService.login(body.email, body.password);
-    return success(res, { token, user });
+    return success(res, "Logged in", { token, user });
   } catch (err) {
     next(err);
   }
@@ -54,7 +54,7 @@ export async function logoutHandler(req: Request, res: Response, next: NextFunct
   try {
     const { auth } = req as AuthenticatedRequest;
     await authService.revokeToken(auth.jti, new Date(auth.exp * 1000));
-    return success(res, {});
+    return success(res, "Logged out", {});
   } catch (err) {
     next(err);
   }

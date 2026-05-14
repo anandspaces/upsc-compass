@@ -9,7 +9,6 @@ async function main() {
   const app = buildApp();
   const server = app.listen(env.PORT, () => {
     console.log(`upsccompass-auth-api listening on http://localhost:${env.PORT} [${env.NODE_ENV}]`);
-    console.log("API base path: /api/v1");
   });
 
   const shutdown = async (signal: string) => {
