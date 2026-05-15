@@ -21,12 +21,11 @@ const EnvSchema = z
 
     BCRYPT_COST: z.coerce.number().int().min(4).max(15).default(12),
 
-    EMAIL_PROVIDER: z.enum(["console", "smtp"]).default("console"),
     EMAIL_FROM: z.string().email().default("no-reply@dextora.app"),
     EMAIL_FROM_NAME: z.string().default("Dextora UPSC Compass"),
 
-    // SMTP (required when EMAIL_PROVIDER=smtp). For Gmail: smtp.gmail.com / 587 / secure=false
-    // (STARTTLS). SMTP_USER = your Gmail address, SMTP_PASSWORD = 16-char app password.
+    // For Gmail: smtp.gmail.com / 587 / secure=false (STARTTLS).
+    // SMTP_USER = your Gmail address, SMTP_PASSWORD = 16-char app password.
     SMTP_HOST: z.string().optional(),
     SMTP_PORT: z.coerce.number().int().positive().optional(),
     SMTP_SECURE: z
@@ -34,25 +33,6 @@ const EnvSchema = z
       .optional(),
     SMTP_USER: z.string().optional(),
     SMTP_PASSWORD: z.string().optional(),
-  })
-  .superRefine((env, ctx) => {
-    if (env.EMAIL_PROVIDER === "smtp") {
-      const required: Array<keyof typeof env> = [
-        "SMTP_HOST",
-        "SMTP_PORT",
-        "SMTP_USER",
-        "SMTP_PASSWORD",
-      ];
-      for (const key of required) {
-        if (env[key] === undefined || env[key] === "") {
-          ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            path: [key],
-            message: `${key} is required when EMAIL_PROVIDER=smtp`,
-          });
-        }
-      }
-    }
   });
 
 export type Env = z.infer<typeof EnvSchema>;

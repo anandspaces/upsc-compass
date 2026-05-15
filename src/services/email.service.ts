@@ -12,19 +12,13 @@ export interface EmailProvider {
   send(msg: EmailMessage): Promise<void>;
 }
 
-class ConsoleEmailProvider implements EmailProvider {
-  async send(msg: EmailMessage): Promise<void> {
-    console.log(`[email:console] to=${msg.to} subject=${JSON.stringify(msg.subject)}\n${msg.text}`);
-  }
-}
-
 class SmtpEmailProvider implements EmailProvider {
   private readonly transporter: Transporter;
   private readonly from: string;
 
   constructor() {
     if (!env.SMTP_HOST || !env.SMTP_PORT || !env.SMTP_USER || !env.SMTP_PASSWORD) {
-      throw new Error("SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD are required for SMTP");
+      throw new Error("SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD are required");
     }
     const secure = env.SMTP_SECURE ?? env.SMTP_PORT === 465;
     this.transporter = nodemailer.createTransport({
@@ -51,15 +45,8 @@ let _provider: EmailProvider | null = null;
 
 export function getEmailProvider(): EmailProvider {
   if (_provider) return _provider;
-  switch (env.EMAIL_PROVIDER) {
-    case "console":
-      _provider = new ConsoleEmailProvider();
-      break;
-    case "smtp":
-      _provider = new SmtpEmailProvider();
-      break;
-  }
-  return _provider as EmailProvider;
+  _provider = new SmtpEmailProvider();
+  return _provider;
 }
 
 export function setEmailProvider(p: EmailProvider): void {

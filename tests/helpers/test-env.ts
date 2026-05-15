@@ -12,7 +12,6 @@ process.env.OTP_MAX_VERIFY_ATTEMPTS = "3";
 process.env.OTP_RESEND_WINDOW_MINUTES = "10";
 process.env.OTP_RESEND_MAX_PER_WINDOW = "3";
 process.env.BCRYPT_COST = "4";
-process.env.EMAIL_PROVIDER = "console";
 process.env.EMAIL_FROM = "test@dextora.app";
 process.env.CORS_ORIGINS = "*";
 

@@ -294,19 +294,13 @@ See `.env.example` for the full list. Highlights:
 | `OTP_RESEND_WINDOW_MINUTES` | `10`          | Window for resend rate limiting                    |
 | `OTP_RESEND_MAX_PER_WINDOW` | `3`           | Max resends per email per window                   |
 | `BCRYPT_COST`               | `12`          | Password hash cost                                 |
-| `EMAIL_PROVIDER`            | `console`     | `console` (dev) or `smtp` (real email)             |
-| `SMTP_HOST` / `_PORT` / `_USER` / `_PASSWORD` | — | Required when `EMAIL_PROVIDER=smtp` (see Email section below) |
+| `SMTP_HOST` / `_PORT` / `_USER` / `_PASSWORD` | — | SMTP credentials (see Email section below) |
 
 ---
 
 ## Email delivery
 
-The OTP email is sent through an `EmailProvider` interface ([src/services/email.service.ts](../src/services/email.service.ts)).
-
-Two providers ship with the app:
-
-- **`console`** *(default)*: logs the email to stdout. Good for local dev — read the OTP in your terminal.
-- **`smtp`**: real SMTP via [nodemailer](https://nodemailer.com). Works with Gmail (using a 16-char App Password), Mailgun, Postmark, Amazon SES SMTP, your own MTA — anything that speaks SMTP.
+The OTP email is sent through an `EmailProvider` interface ([src/services/email.service.ts](../src/services/email.service.ts)) backed by SMTP via [nodemailer](https://nodemailer.com). Works with Gmail (using a 16-char App Password), Mailgun, Postmark, Amazon SES SMTP, your own MTA — anything that speaks SMTP.
 
 ### Using Gmail with an App Password
 
@@ -315,7 +309,6 @@ Two providers ship with the app:
 3. Fill in `.env`:
 
    ```env
-   EMAIL_PROVIDER=smtp
    EMAIL_FROM=your.address@gmail.com
    EMAIL_FROM_NAME=Dextora UPSC Compass
 
@@ -430,4 +423,4 @@ The JWT returned by `verify-otp` / `login` should be sent as `Authorization: Bea
 - Use strong, random `JWT_SECRET` and `OTP_SECRET` (≥ 64 hex chars). Generate with `openssl rand -hex 64`.
 - Restrict `CORS_ORIGINS` to your real app origins.
 - Schedule `DELETE FROM revoked_tokens WHERE expires_at < now();` and `DELETE FROM otps WHERE expires_at < now() - interval '1 day';` as a daily cron.
-- Set `EMAIL_PROVIDER=smtp` with production SMTP credentials before going live (Gmail is fine for low volume; switch to SES/Postmark/Mailgun for production scale).
+- Configure production SMTP credentials before going live (Gmail is fine for low volume; switch to SES/Postmark/Mailgun for production scale).
