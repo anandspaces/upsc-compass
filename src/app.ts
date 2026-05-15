@@ -2,6 +2,7 @@ import path from "node:path";
 import express, { type Express } from "express";
 import { env } from "./config/env";
 import { errorHandler, notFoundHandler } from "./middleware/error-handler";
+import { requestLogger } from "./middleware/request-logger";
 import apiRoutes from "./routes";
 
 export function buildApp(): Express {
@@ -41,7 +42,7 @@ export function buildApp(): Express {
     }),
   );
 
-  app.use("/api/v1", apiRoutes);
+  app.use("/api/v1", requestLogger, apiRoutes);
 
   app.use(notFoundHandler);
   app.use(errorHandler);
