@@ -11,6 +11,11 @@ export type ErrorCode =
   | "UNAUTHORIZED"
   | "TOKEN_EXPIRED"
   | "TOKEN_REVOKED"
+  | "FORBIDDEN"
+  | "ASSESSMENT_NOT_FOUND"
+  | "ASSESSMENT_ALREADY_SUBMITTED"
+  | "FILE_TOO_LARGE"
+  | "INVALID_UPLOAD"
   | "INTERNAL_ERROR";
 
 export class AppError extends Error {
@@ -58,4 +63,20 @@ export const Errors = {
   tokenRevoked: () => new AppError(401, "TOKEN_REVOKED", "This token has been revoked."),
   validation: (fields: Record<string, string>) =>
     new AppError(422, "VALIDATION_FAILED", "One or more fields are invalid.", fields),
+  forbidden: () => new AppError(403, "FORBIDDEN", "You do not have access to this resource."),
+  assessmentNotFound: () => new AppError(404, "ASSESSMENT_NOT_FOUND", "Assessment not found."),
+  assessmentAlreadySubmitted: () =>
+    new AppError(
+      409,
+      "ASSESSMENT_ALREADY_SUBMITTED",
+      "This assessment session has already been submitted.",
+    ),
+  fileTooLarge: (maxBytes: number) =>
+    new AppError(
+      413,
+      "FILE_TOO_LARGE",
+      `Uploaded file exceeds the maximum allowed size of ${Math.round(maxBytes / (1024 * 1024))} MB.`,
+    ),
+  invalidUpload: (message: string, fields?: Record<string, string>) =>
+    new AppError(400, "INVALID_UPLOAD", message, fields),
 };

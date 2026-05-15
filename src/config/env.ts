@@ -4,6 +4,13 @@ const EnvSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: z.coerce.number().int().positive().default(3000),
   CORS_ORIGINS: z.string().default("*"),
+  PUBLIC_BASE_URL: z.string().url().default("http://localhost:3000"),
+  UPLOAD_DIR: z.string().default("uploads"),
+  REPORT_PDF_MAX_BYTES: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(20 * 1024 * 1024),
 
   DATABASE_URL: z.string().url(),
   TEST_DATABASE_URL: z.string().url().optional(),
