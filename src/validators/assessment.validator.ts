@@ -2,7 +2,7 @@ import { z } from "zod";
 
 const isoDate = z
   .string({ required_error: "Required" })
-  .datetime({ offset: true, message: "Must be an ISO 8601 timestamp" });
+  .datetime({ offset: true, local: true, message: "Must be an ISO 8601 timestamp" });
 
 const stageSchema = z
   .string({ required_error: "Required" })
